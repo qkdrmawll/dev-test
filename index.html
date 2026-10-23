@@ -79,16 +79,27 @@
     const $ = id => document.getElementById(id);
     const bestScoreKey = "cosmo-best-score";
     let bestScore = null, recordStorageAvailable = true;
+    function parseBestScore(value) {
+      if (value === null) return null;
+      const parsed = Number(value);
+      return Number.isInteger(parsed) && String(parsed) === value && parsed >= 0 && parsed <= questions.length * 10 && parsed % 10 === 0
+        ? parsed
+        : null;
+    }
     try {
-      const savedScore = localStorage.getItem(bestScoreKey);
-      if (savedScore !== null) {
-        const parsedScore = Number(savedScore);
-        if (Number.isInteger(parsedScore) && String(parsedScore) === savedScore && parsedScore >= 0 && parsedScore <= questions.length * 10 && parsedScore % 10 === 0) bestScore = parsedScore;
-      }
+      bestScore = parseBestScore(localStorage.getItem(bestScoreKey));
     } catch (error) {
       recordStorageAvailable = false;
       console.warn("최고 점수를 브라우저에서 불러오지 못했습니다.", error);
     }
+    window.addEventListener("storage", event => {
+      if (event.key !== bestScoreKey) return;
+      const storedScore = parseBestScore(event.newValue);
+      if (storedScore !== null && (bestScore === null || storedScore > bestScore)) {
+        bestScore = storedScore;
+        renderBestScore();
+      }
+    });
     let current = 0, score = 0, answered = false, finished = false;
     const wrongAnswers = [];
     function renderBestScore() {
@@ -153,20 +164,35 @@
       $("next").disabled = false;
       updateProgress(current + 1);
     }
-    function showResults() {
+    async function showResults() {
       finished = true;
-      const isNewRecord = bestScore === null ? recordStorageAvailable : score > bestScore;
-      if (isNewRecord) {
-        bestScore = score;
+      const saveBestScore = () => {
         if (recordStorageAvailable) {
           try {
-            localStorage.setItem(bestScoreKey, String(bestScore));
+            const storedScore = parseBestScore(localStorage.getItem(bestScoreKey));
+            if (storedScore !== null && (bestScore === null || storedScore > bestScore)) bestScore = storedScore;
           } catch (error) {
             recordStorageAvailable = false;
-            console.warn("최고 점수를 브라우저에 저장하지 못했습니다.", error);
+            console.warn("최고 점수를 브라우저에서 불러오지 못했습니다.", error);
           }
         }
-      }
+        const isNewRecord = bestScore === null ? recordStorageAvailable : score > bestScore;
+        if (isNewRecord) {
+          bestScore = score;
+          if (recordStorageAvailable) {
+            try {
+              localStorage.setItem(bestScoreKey, String(bestScore));
+            } catch (error) {
+              recordStorageAvailable = false;
+              console.warn("최고 점수를 브라우저에 저장하지 못했습니다.", error);
+            }
+          }
+        }
+        return isNewRecord;
+      };
+      const isNewRecord = navigator.locks
+        ? await navigator.locks.request(`${bestScoreKey}-lock`, saveBestScore)
+        : saveBestScore();
       renderBestScore();
       $("quiz").hidden = true;
       $("keyboard-tip").hidden = true;
